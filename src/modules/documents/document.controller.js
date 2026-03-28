@@ -3,6 +3,7 @@ const { AppError } = require("../../utils/appError");
 const { createUploadedDocument } = require("./document.service");
 const { parsePdfWithGemini } = require("../parsing/parsing.service");
 const Document = require("../../models/document.model");
+const { storeStructuredRecord } = require("./document.storage");
 
 const uploadDocument = asyncHandler(async (req, res) => {
   const { documentType } = req.body;
@@ -41,6 +42,13 @@ const uploadDocument = asyncHandler(async (req, res) => {
         normalized: parsed.normalized
       },
       parseError: null
+    });
+
+    // Step 5: store structured document into its own collection
+    await storeStructuredRecord({
+      documentType,
+      documentId: doc._id,
+      normalized: parsed.normalized
     });
   } catch (err) {
     await Document.findByIdAndUpdate(doc._id, {
