@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 
 const documentRoutes = require("./modules/documents/document.routes");
+const matchRoutes = require("./modules/matching/match.routes");
 const { notFound } = require("./middlewares/notFound.middleware");
 const { errorHandler } = require("./middlewares/error.middleware");
 
@@ -19,6 +20,7 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/documents", documentRoutes);
+app.use("/match", matchRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

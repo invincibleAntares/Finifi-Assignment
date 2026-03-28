@@ -2,6 +2,7 @@ const MatchResult = require("../../models/matchResult.model");
 const PurchaseOrder = require("../../models/po.model");
 const GRN = require("../../models/grn.model");
 const Invoice = require("../../models/invoice.model");
+const Document = require("../../models/document.model");
 
 function sumByMatchKey(items, qtyField) {
   const map = new Map();
@@ -48,10 +49,11 @@ function computeStatus({ hasAllDocs, reasons, poQtyByKey, grnQtyByKey, invoiceQt
 async function recomputeMatchForPoNumber(poNumber) {
   if (!poNumber) throw new Error("poNumber is required");
 
-  const [pos, grns, invoices] = await Promise.all([
+  const [pos, grns, invoices, documents] = await Promise.all([
     PurchaseOrder.find({ poNumber }).sort({ createdAt: -1 }).lean(),
     GRN.find({ poNumber }).sort({ createdAt: -1 }).lean(),
-    Invoice.find({ poNumber }).sort({ createdAt: -1 }).lean()
+    Invoice.find({ poNumber }).sort({ createdAt: -1 }).lean(),
+    Document.find({ "extracted.poNumber": poNumber }).select({ _id: 1 }).lean()
   ]);
 
   const reasons = [];
@@ -67,45 +69,58 @@ async function recomputeMatchForPoNumber(poNumber) {
   const grnQtyByKey = new Map();
   const invoiceQtyByKey = new Map();
 
-  // Sum GRN quantities and validate keys exist in PO
+  // Sum GRN quantities
   for (const g of grns) {
     const m = sumByMatchKey(g.items, "receivedQuantity");
     for (const [key, qty] of m.entries()) {
-      if (!poQtyByKey.has(key)) {
-        addReason(reasons, { code: "item_missing_in_po", itemMatchKey: key });
-      }
       grnQtyByKey.set(key, (grnQtyByKey.get(key) || 0) + qty);
     }
   }
 
-  // Sum invoice quantities and validate keys exist in PO
+  // Sum invoice quantities
   for (const inv of invoices) {
     const m = sumByMatchKey(inv.items, "quantity");
     for (const [key, qty] of m.entries()) {
-      if (!poQtyByKey.has(key)) {
-        addReason(reasons, { code: "item_missing_in_po", itemMatchKey: key });
-      }
       invoiceQtyByKey.set(key, (invoiceQtyByKey.get(key) || 0) + qty);
     }
   }
 
-  // Quantity rules (item-level)
-  for (const [key, grnQty] of grnQtyByKey.entries()) {
-    const poQty = poQtyByKey.get(key) || 0;
-    if (grnQty > poQty) {
-      addReason(reasons, { code: "grn_qty_exceeds_po_qty", itemMatchKey: key, expected: poQty, actual: grnQty });
+  // Out-of-order hardening:
+  // Only mark missing-in-PO when a PO exists (otherwise it's just "insufficient_documents").
+  if (poLatest) {
+    for (const key of grnQtyByKey.keys()) {
+      if (!poQtyByKey.has(key)) addReason(reasons, { code: "item_missing_in_po", itemMatchKey: key });
+    }
+    for (const key of invoiceQtyByKey.keys()) {
+      if (!poQtyByKey.has(key)) addReason(reasons, { code: "item_missing_in_po", itemMatchKey: key });
     }
   }
 
-  for (const [key, invQty] of invoiceQtyByKey.entries()) {
-    const poQty = poQtyByKey.get(key) || 0;
-    const grnQty = grnQtyByKey.get(key) || 0;
-
-    if (invQty > poQty) {
-      addReason(reasons, { code: "invoice_qty_exceeds_po_qty", itemMatchKey: key, expected: poQty, actual: invQty });
+  // Quantity rules (item-level)
+  if (poLatest && grns.length > 0) {
+    for (const [key, grnQty] of grnQtyByKey.entries()) {
+      const poQty = poQtyByKey.get(key) || 0;
+      if (grnQty > poQty) {
+        addReason(reasons, { code: "grn_qty_exceeds_po_qty", itemMatchKey: key, expected: poQty, actual: grnQty });
+      }
     }
-    if (invQty > grnQty) {
-      addReason(reasons, { code: "invoice_qty_exceeds_grn_qty", itemMatchKey: key, expected: grnQty, actual: invQty });
+  }
+
+  if (poLatest && invoices.length > 0) {
+    for (const [key, invQty] of invoiceQtyByKey.entries()) {
+      const poQty = poQtyByKey.get(key) || 0;
+      if (invQty > poQty) {
+        addReason(reasons, { code: "invoice_qty_exceeds_po_qty", itemMatchKey: key, expected: poQty, actual: invQty });
+      }
+    }
+  }
+
+  if (grns.length > 0 && invoices.length > 0) {
+    for (const [key, invQty] of invoiceQtyByKey.entries()) {
+      const grnQty = grnQtyByKey.get(key) || 0;
+      if (invQty > grnQty) {
+        addReason(reasons, { code: "invoice_qty_exceeds_grn_qty", itemMatchKey: key, expected: grnQty, actual: invQty });
+      }
     }
   }
 
@@ -121,7 +136,7 @@ async function recomputeMatchForPoNumber(poNumber) {
   const status = computeStatus({ hasAllDocs, reasons, poQtyByKey, grnQtyByKey, invoiceQtyByKey });
 
   const linked = {
-    documentIds: [],
+    documentIds: documents.map((d) => d._id),
     purchaseOrderIds: poLatest ? [poLatest._id] : [],
     grnIds: grns.map((g) => g._id),
     invoiceIds: invoices.map((i) => i._id)
