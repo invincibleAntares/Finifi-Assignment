@@ -4,6 +4,7 @@ const { createUploadedDocument } = require("./document.service");
 const { parsePdfWithGemini } = require("../parsing/parsing.service");
 const Document = require("../../models/document.model");
 const { storeStructuredRecord } = require("./document.storage");
+const mongoose = require("mongoose");
 
 const uploadDocument = asyncHandler(async (req, res) => {
   const { documentType } = req.body;
@@ -70,5 +71,28 @@ const uploadDocument = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { uploadDocument };
+const getDocumentById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const includeRaw = String(req.query.includeRaw || "false").toLowerCase() === "true";
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new AppError("Invalid document id", 400);
+  }
+
+  const doc = await Document.findById(id).lean();
+  if (!doc) {
+    throw new AppError("Document not found", 404);
+  }
+
+  if (!includeRaw && doc.parsed) {
+    doc.parsed = { normalized: doc.parsed.normalized };
+  }
+
+  res.status(200).json({
+    message: "OK",
+    data: doc
+  });
+});
+
+module.exports = { uploadDocument, getDocumentById };
 
