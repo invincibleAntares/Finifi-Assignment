@@ -5,6 +5,7 @@ const { parsePdfWithGemini } = require("../parsing/parsing.service");
 const Document = require("../../models/document.model");
 const { storeStructuredRecord } = require("./document.storage");
 const mongoose = require("mongoose");
+const { recomputeMatchForPoNumber } = require("../matching/match.service");
 
 const uploadDocument = asyncHandler(async (req, res) => {
   const { documentType } = req.body;
@@ -51,6 +52,9 @@ const uploadDocument = asyncHandler(async (req, res) => {
       documentId: doc._id,
       normalized: parsed.normalized
     });
+
+    // Step 7: recompute match result for this poNumber
+    await recomputeMatchForPoNumber(poNumber);
   } catch (err) {
     await Document.findByIdAndUpdate(doc._id, {
       status: "parse_failed",

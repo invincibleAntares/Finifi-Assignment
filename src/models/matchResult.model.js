@@ -27,6 +27,7 @@ const MatchResultSchema = new mongoose.Schema(
       grnIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "GRN" }],
       invoiceIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Invoice" }]
     },
+    debug: { type: mongoose.Schema.Types.Mixed },
     computedAt: { type: Date, default: Date.now }
   },
   { timestamps: true }
