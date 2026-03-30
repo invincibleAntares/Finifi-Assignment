@@ -25,7 +25,11 @@ Backend service to upload **PO / GRN / Invoice** PDFs, extract structured data u
 
 ### Important note about item matching (why you may see `item_missing_in_po`)
 
-The matcher uses **SKU-first** when both sides have a numeric SKU. If SKU is missing (common on invoices), it falls back to **`normalizedDescription`**. Because invoices sometimes use shorter/generic names (e.g. `CHICKEN MOMOS`) while PO/GRN include qualifiers (e.g. `ORIGINAL`, `SPICY`, brand/pack wording), you can still see `item_missing_in_po` even when a human feels it’s “the same product family”.
+Matching is deterministic:
+- Prefer **SKU** when available across documents
+- Otherwise fall back to **`normalizedDescription`** (best-effort, not guaranteed)
+
+Because invoices sometimes use shorter/generic names (e.g. `CHICKEN MOMOS`) while PO/GRN include qualifiers (e.g. `ORIGINAL`, `SPICY`, brand/pack wording), you can still see `item_missing_in_po` even when they represent the same product at a business level.
 
 ## Tech stack
 
@@ -182,6 +186,7 @@ To avoid double counting when the same GRN/Invoice is uploaded twice:
 
 - Add async processing (queue) for parsing/matching
 - Add stronger item matching (token similarity + pack-size extraction + confidence scoring)
+- Introduce confidence scoring for matches instead of strict binary matching
 - Add OpenAPI/Swagger + request validation
 - Add tests + fixtures for multiple PDF layouts
 
@@ -193,6 +198,26 @@ Import the collection (required deliverable in this assignment):
 ## Example outputs
 
 Below is **one real example run** (truncated with `...` to keep the README short).
+
+### How to interpret this example output
+
+This example run is useful because it shows both:
+- **True business mismatches** (assignment rules violated)
+- **Practical matching limitations** caused by inconsistent item naming across documents/systems
+
+In this dataset, the following mismatch reasons are **very likely correct**:
+- `invoice_qty_exceeds_po_qty` for `SKU:205950` (PO qty 40, invoice qty 50)
+- `invoice_qty_exceeds_grn_qty` for `SKU:205950` (GRN qty 40, invoice qty 50)
+- `invoice_date_after_po_date` (PO date 2026‑03‑17, invoice/GRN date 2026‑03‑24)
+
+Some `item_missing_in_po` entries can be **false positives** even when the item exists in PO/GRN, because invoice uses a different naming style. Common causes:
+- **Token order changes**: `CHEESE CHICKEN MOMOS` vs `CHICKEN CHEESE MOMOS`
+- **Singular/plural**: `SAUSAGE` vs `SAUSAGES`, `ROLL` vs `ROLLS`
+- **Extra qualifiers**: `CHICKEN CURRY CUT` vs `CHICKEN CURRY CUT SKINLESS`
+- **Word order / hyphenation**: `SPRING ROLL CHINESE VEG` vs `CHINESE VEG SPRING ROLLS`
+- **Shorthand vs full label**: invoice may say `CHICKEN MOMOS` while PO/GRN say `ORIGINAL CHICKEN MOMOS`
+
+**Design choice (intentional)**: for the assignment, we keep the matching engine clean and deterministic (SKU-first, description fallback) and avoid a large fuzzy/alias engine. This keeps the solution maintainable and debuggable, but it means a few edge cases can still show as `item_missing_in_po`.
 
 ### 1) Upload (3 separate requests)
 
@@ -265,7 +290,7 @@ Below is **one real example run** (truncated with `...` to keep the README short
             "sku": "205950",
             "normalizedDescription": "PORK PEPPERONI SALAMI 100 G",
             "quantity": 40
-          }
+          },
           ...
         ]
       }
@@ -299,7 +324,7 @@ Below is **one real example run** (truncated with `...` to keep the README short
         "expected": 40,
         "actual": 50
       },
-      { "code": "invoice_date_after_po_date" }
+      { "code": "invoice_date_after_po_date" },
       ...
     ],
     "computedAt": "2026-03-30T06:24:16.525Z"
