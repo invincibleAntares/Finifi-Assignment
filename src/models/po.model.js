@@ -2,9 +2,11 @@ const mongoose = require("mongoose");
 
 const POItemSchema = new mongoose.Schema(
   {
-    matchKey: { type: String, required: true, index: true },
-    sku: { type: String },
-    description: { type: String },
+    sku: { type: String, index: true },
+    docItemCode: { type: String },
+    rawDescription: { type: String },
+    cleanDescriptionFromGemini: { type: String },
+    normalizedDescription: { type: String, required: true, index: true },
     quantity: { type: Number, required: true, min: 0 }
   },
   { _id: false }

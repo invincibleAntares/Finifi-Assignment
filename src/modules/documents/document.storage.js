@@ -28,12 +28,13 @@ async function storeStructuredRecord({ documentType, documentId, normalized }) {
   }
 
   if (documentType === "grn") {
+    const grnNumber = normalized.grnNumber || undefined;
     return await GRN.findOneAndUpdate(
-      { documentId },
+      grnNumber ? { poNumber: normalized.poNumber, grnNumber } : { documentId },
       {
         documentId,
         poNumber: normalized.poNumber,
-        grnNumber: normalized.grnNumber || null,
+        grnNumber,
         grnDate: isoToDateOrNull(normalized.grnDate),
         items: Array.isArray(normalized.items) ? normalized.items : []
       },
@@ -42,12 +43,13 @@ async function storeStructuredRecord({ documentType, documentId, normalized }) {
   }
 
   if (documentType === "invoice") {
+    const invoiceNumber = normalized.invoiceNumber || undefined;
     return await Invoice.findOneAndUpdate(
-      { documentId },
+      invoiceNumber ? { poNumber: normalized.poNumber, invoiceNumber } : { documentId },
       {
         documentId,
         poNumber: normalized.poNumber,
-        invoiceNumber: normalized.invoiceNumber || null,
+        invoiceNumber,
         invoiceDate: isoToDateOrNull(normalized.invoiceDate),
         items: Array.isArray(normalized.items) ? normalized.items : []
       },

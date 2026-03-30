@@ -2,9 +2,11 @@ const mongoose = require("mongoose");
 
 const GRNItemSchema = new mongoose.Schema(
   {
-    matchKey: { type: String, required: true, index: true },
-    sku: { type: String },
-    description: { type: String },
+    sku: { type: String, index: true },
+    docItemCode: { type: String },
+    rawDescription: { type: String },
+    cleanDescriptionFromGemini: { type: String },
+    normalizedDescription: { type: String, required: true, index: true },
     receivedQuantity: { type: Number, required: true, min: 0 }
   },
   { _id: false }
@@ -21,7 +23,7 @@ const GRNSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-GRNSchema.index({ poNumber: 1, grnNumber: 1 });
+GRNSchema.index({ poNumber: 1, grnNumber: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("GRN", GRNSchema);
 

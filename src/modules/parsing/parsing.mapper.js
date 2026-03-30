@@ -1,17 +1,27 @@
-const { buildMatchKey, parseDateToISO, toNumber, toStringOrNull } = require("./parsing.utils");
+const { normalizeDescription, normalizeSku, parseDateToISO, toNumber, toStringOrNull } = require("./parsing.utils");
 
 function normalizeItems(items, qtyField) {
   const arr = Array.isArray(items) ? items : [];
   return arr
     .map((it) => {
-      const sku = toStringOrNull(it?.sku ?? it?.itemCode);
-      const description = toStringOrNull(it?.description);
+      const skuRaw = toStringOrNull(it?.sku);
+      const docItemCode = toStringOrNull(it?.docItemCode ?? it?.itemCode);
+      const rawDescription = toStringOrNull(it?.rawDescription ?? it?.description);
+      const cleanFromGemini = toStringOrNull(it?.cleanDescription) || toStringOrNull(it?.description) || rawDescription;
       const qty = toNumber(it?.[qtyField]);
-      const matchKey = buildMatchKey({ sku, description });
+      const normalizedDescription = normalizeDescription(cleanFromGemini);
+      const sku = normalizeSku(skuRaw);
 
-      if (!matchKey || qty === null) return null;
+      if (!normalizedDescription || qty === null) return null;
 
-      return { matchKey, sku, description, [qtyField]: qty };
+      return {
+        sku,
+        docItemCode,
+        rawDescription,
+        cleanDescriptionFromGemini: cleanFromGemini,
+        normalizedDescription,
+        [qtyField]: qty
+      };
     })
     .filter(Boolean);
 }
@@ -32,9 +42,11 @@ function mapGeminiJsonToNormalized({ documentType, geminiJson }) {
         poDate: parseDateToISO(data.poDate),
         vendorName: toStringOrNull(data.vendorName),
         items: normalizeItems(data.items, "quantity").map((x) => ({
-          matchKey: x.matchKey,
           sku: x.sku,
-          description: x.description,
+          docItemCode: x.docItemCode,
+          rawDescription: x.rawDescription,
+          cleanDescriptionFromGemini: x.cleanDescriptionFromGemini,
+          normalizedDescription: x.normalizedDescription,
           quantity: x.quantity
         }))
       }
@@ -54,9 +66,11 @@ function mapGeminiJsonToNormalized({ documentType, geminiJson }) {
         grnNumber: toStringOrNull(data.grnNumber),
         grnDate: parseDateToISO(data.grnDate),
         items: normalizeItems(data.items, "receivedQuantity").map((x) => ({
-          matchKey: x.matchKey,
           sku: x.sku,
-          description: x.description,
+          docItemCode: x.docItemCode,
+          rawDescription: x.rawDescription,
+          cleanDescriptionFromGemini: x.cleanDescriptionFromGemini,
+          normalizedDescription: x.normalizedDescription,
           receivedQuantity: x.receivedQuantity
         }))
       }
@@ -76,9 +90,11 @@ function mapGeminiJsonToNormalized({ documentType, geminiJson }) {
         invoiceNumber: toStringOrNull(data.invoiceNumber),
         invoiceDate: parseDateToISO(data.invoiceDate),
         items: normalizeItems(data.items, "quantity").map((x) => ({
-          matchKey: x.matchKey,
           sku: x.sku,
-          description: x.description,
+          docItemCode: x.docItemCode,
+          rawDescription: x.rawDescription,
+          cleanDescriptionFromGemini: x.cleanDescriptionFromGemini,
+          normalizedDescription: x.normalizedDescription,
           quantity: x.quantity
         }))
       }
