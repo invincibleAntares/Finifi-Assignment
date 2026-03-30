@@ -1,4 +1,4 @@
-# Three-Way Match Engine (PO · GRN · Invoice)
+## Three-Way Match Engine (PO · GRN · Invoice)
 
 Backend service to upload **PO / GRN / Invoice** PDFs, extract structured data using **Gemini**, store it in **MongoDB**, and compute a **three-way match** by `poNumber` (upload order does not matter).
 
@@ -11,6 +11,21 @@ Backend service to upload **PO / GRN / Invoice** PDFs, extract structured data u
 - **Three-way match** at item level and return:
   - `matched` / `partially_matched` / `mismatch` / `insufficient_documents`
   - mismatch reason codes
+
+## Assumptions (read this first)
+
+- **Link key**: all documents contain a reliable `poNumber` (this is the join key).
+- **Item identifiers differ by document**:
+  - PO/GRN usually contain a **numeric SKU** (e.g. `205950`).
+  - Invoice often contains **document-local item codes** (e.g. `FG-P-F-0237`) that are *not* the same as PO/GRN SKU.
+- **Gemini’s job**: extract structured rows + provide cleaner text. The backend does not ask Gemini “do these items match?”.
+- **Variants are treated as different items** unless there is an explicit identical key:
+  - `ORIGINAL CHICKEN MOMOS 24 PIECES` ≠ `CHICKEN MOMOS 24 PIECES`
+  - `SPICY CHICKEN MOMOS 24 PIECES` ≠ `CHICKEN MOMOS 24 PIECES`
+
+### Important note about item matching (why you may see `item_missing_in_po`)
+
+The matcher uses **SKU-first** when both sides have a numeric SKU. If SKU is missing (common on invoices), it falls back to **`normalizedDescription`**. Because invoices sometimes use shorter/generic names (e.g. `CHICKEN MOMOS`) while PO/GRN include qualifiers (e.g. `ORIGINAL`, `SPICY`, brand/pack wording), you can still see `item_missing_in_po` even when a human feels it’s “the same product family”.
 
 ## Tech stack
 
@@ -152,14 +167,6 @@ To avoid double counting when the same GRN/Invoice is uploaded twice:
 - Invoice is unique by `(poNumber, invoiceNumber)`
 - matcher also deduplicates by these business numbers before summing
 
-## Assumptions
-
-- PDFs contain a reliable `poNumber` (used as the link key)
-- PO/GRN use numeric product codes more often than Invoice (invoice may have document-local item codes)
-- Gemini is used for **structured extraction + text cleanup only** (not for deciding which items “match”)
-- We store both raw + normalized fields for debugging (`rawDescription`, `cleanDescriptionFromGemini`, `normalizedDescription`)
-- Invoice item codes like `FG-...` are treated as **document-local** identifiers and are **not** used as cross-document keys
-
 ## Tradeoffs
 
 - Matching by `normalizedDescription` is a fallback and can still be imperfect if descriptions differ materially.
@@ -180,13 +187,123 @@ To avoid double counting when the same GRN/Invoice is uploaded twice:
 
 ## API usage examples (Postman)
 
-Import the collection:
+Import the collection (required deliverable in this assignment):
 - `postman/three-way-match.postman_collection.json`
 
 ## Example outputs
 
-Add these after you run a clean test (clear DB, re-upload PO/GRN/Invoice once):
+Below is **one real example run** (truncated with `...` to keep the README short).
 
-- **Parsed document example**: paste a response from `GET /documents/:id?includeRaw=true`
-- **Match result example**: paste a response from `GET /match/:poNumber`
+### 1) Upload (3 separate requests)
+
+`POST /documents/upload` (PO)
+
+```json
+{
+  "message": "Uploaded",
+  "data": {
+    "documentId": "69ca16c8f3938c1c04de223c",
+    "documentType": "po",
+    "status": "parsed",
+    "poNumber": "CI4PO05788"
+  }
+}
+```
+
+`POST /documents/upload` (Invoice)
+
+```json
+{
+  "message": "Uploaded",
+  "data": {
+    "documentId": "69ca16adf3938c1c04de2232",
+    "documentType": "invoice",
+    "status": "parsed",
+    "poNumber": "CI4PO05788"
+  }
+}
+```
+
+`POST /documents/upload` (GRN)
+
+```json
+{
+  "message": "Uploaded",
+  "data": {
+    "documentId": "69ca1708f3938c1c04de2246",
+    "documentType": "grn",
+    "status": "parsed",
+    "poNumber": "CI4PO05788"
+  }
+}
+```
+
+### 2) Get one parsed document (example: PO)
+
+`GET /documents/69ca16c8f3938c1c04de223c?includeRaw=false`
+
+```json
+{
+  "message": "OK",
+  "data": {
+    "_id": "69ca16c8f3938c1c04de223c",
+    "documentType": "po",
+    "status": "parsed",
+    "extracted": { "poNumber": "CI4PO05788" },
+    "parsed": {
+      "normalized": {
+        "poNumber": "CI4PO05788",
+        "poDate": "2026-03-17",
+        "vendorName": "M/s AFP",
+        "items": [
+          {
+            "sku": "11423",
+            "normalizedDescription": "CHEESY SPICY VEG MOMOS 24 PIECES",
+            "quantity": 50
+          },
+          {
+            "sku": "205950",
+            "normalizedDescription": "PORK PEPPERONI SALAMI 100 G",
+            "quantity": 40
+          }
+          ...
+        ]
+      }
+    }
+  }
+}
+```
+
+### 3) Get match result
+
+`GET /match/CI4PO05788?includeDebug=false`
+
+```json
+{
+  "message": "OK",
+  "data": {
+    "poNumber": "CI4PO05788",
+    "status": "mismatch",
+    "reasons": [
+      { "code": "item_missing_in_po", "itemMatchKey": "CHICKEN MOMOS 24 PIECES" },
+      { "code": "item_missing_in_po", "itemMatchKey": "CHICKEN MOMOS 10 PIECES" },
+      {
+        "code": "invoice_qty_exceeds_po_qty",
+        "itemMatchKey": "SKU:205950",
+        "expected": 40,
+        "actual": 50
+      },
+      {
+        "code": "invoice_qty_exceeds_grn_qty",
+        "itemMatchKey": "SKU:205950",
+        "expected": 40,
+        "actual": 50
+      },
+      { "code": "invoice_date_after_po_date" }
+      ...
+    ],
+    "computedAt": "2026-03-30T06:24:16.525Z"
+  }
+}
+```
 
